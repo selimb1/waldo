@@ -81,6 +81,50 @@
           </div>
         </div>
       </div>
+      <div class="row">
+        <div class="col-md-6">
+          <div class="card shadow-sm mb-3">
+            <div class="card-body">
+              <h5 class="card-title">Valor declarado</h5>
+              <p class="h3">
+                ${{ '{:,.2f}'.format(total_declared_value) }}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card shadow-sm mb-3">
+            <div class="card-body">
+              <h5 class="card-title">Valor detectado</h5>
+              <p class="h3">
+                ${{ '{:,.2f}'.format(total_detected_value) }}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6">
+          <div class="card shadow-sm mb-3">
+            <div class="card-body">
+              <h5 class="card-title">Valor depreciado declarado</h5>
+              <p class="h3">
+                ${{ '{:,.2f}'.format(total_declared_residual_value) }}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card shadow-sm mb-3">
+            <div class="card-body">
+              <h5 class="card-title">Valor depreciado detectado</h5>
+              <p class="h3">
+                ${{ '{:,.2f}'.format(total_detected_residual_value) }}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="mb-5">
@@ -95,6 +139,14 @@
               <th>Detectado</th>
               <th>Diferencia</th>
               <th>Estado</th>
+              <th>Valor declarado</th>
+              <th>Valor detectado</th>
+              <th>Diferencia valor</th>
+              <th>Estado valor</th>
+              <th>Val. depreciado declarado</th>
+              <th>Val. depreciado detectado</th>
+              <th>Diferencia val. depreciado</th>
+              <th>Estado val. depreciado</th>
             </tr>
           </thead>
           <tbody>
@@ -109,11 +161,27 @@
               <td>
                 <span class="badge badge-status-{{ item.status }}">{{ item.status }}</span>
               </td>
+              <td>${{ '{:,.2f}'.format(item.declared_gross_value) }}</td>
+              <td>${{ '{:,.2f}'.format(item.detected_gross_value) }}</td>
+              <td>${{ '{:,.2f}'.format(item.gross_value_difference) }}</td>
+              <td>
+                <span class="badge badge-status-{{ item.gross_value_status }}">
+                  {{ item.gross_value_status }}
+                </span>
+              </td>
+              <td>${{ '{:,.2f}'.format(item.declared_residual_value) }}</td>
+              <td>${{ '{:,.2f}'.format(item.detected_residual_value) }}</td>
+              <td>${{ '{:,.2f}'.format(item.residual_value_difference) }}</td>
+              <td>
+                <span class="badge badge-status-{{ item.residual_value_status }}">
+                  {{ item.residual_value_status }}
+                </span>
+              </td>
             </tr>
             {% endfor %}
             {% else %}
             <tr>
-              <td colspan="6" class="text-center text-muted">Sin datos de conciliación.</td>
+              <td colspan="14" class="text-center text-muted">Sin datos de conciliación.</td>
             </tr>
             {% endif %}
           </tbody>

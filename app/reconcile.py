@@ -14,9 +14,19 @@ STATUS_OK = "OK"
 STATUS_SURPLUS = "SOBRANTE"
 STATUS_MISSING = "FALTANTE"
 
+VALUE_TOLERANCE = 1e-6
+
 
 def _determine_status(difference: int) -> str:
     if difference == 0:
+        return STATUS_OK
+    if difference > 0:
+        return STATUS_SURPLUS
+    return STATUS_MISSING
+
+
+def _determine_value_status(difference: float) -> str:
+    if abs(difference) <= VALUE_TOLERANCE:
         return STATUS_OK
     if difference > 0:
         return STATUS_SURPLUS
@@ -52,13 +62,55 @@ def run_reconciliation(config: dict, detections_path: Path) -> Path:
         how="outer",
     )
 
-    reconciliation_df["declared_quantity"] = reconciliation_df["declared_quantity"].fillna(0).astype(int)
-    reconciliation_df["detected_quantity"] = reconciliation_df["detected_quantity"].fillna(0).astype(int)
+    reconciliation_df["declared_quantity"] = (
+        pd.to_numeric(reconciliation_df["declared_quantity"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
+    reconciliation_df["detected_quantity"] = (
+        pd.to_numeric(reconciliation_df["detected_quantity"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
+
+    for column in ["declared_unit_value", "declared_unit_residual_value"]:
+        if column not in reconciliation_df.columns:
+            reconciliation_df[column] = 0.0
+        reconciliation_df[column] = reconciliation_df[column].fillna(0).astype(float)
 
     reconciliation_df["difference"] = (
         reconciliation_df["detected_quantity"] - reconciliation_df["declared_quantity"]
     )
     reconciliation_df["status"] = reconciliation_df["difference"].apply(_determine_status)
+
+    reconciliation_df["declared_gross_value"] = (
+        reconciliation_df["declared_quantity"] * reconciliation_df["declared_unit_value"]
+    )
+    reconciliation_df["detected_gross_value"] = (
+        reconciliation_df["detected_quantity"] * reconciliation_df["declared_unit_value"]
+    )
+    reconciliation_df["gross_value_difference"] = (
+        reconciliation_df["detected_gross_value"] - reconciliation_df["declared_gross_value"]
+    )
+    reconciliation_df["gross_value_status"] = reconciliation_df["gross_value_difference"].apply(
+        _determine_value_status
+    )
+
+    reconciliation_df["declared_residual_value"] = (
+        reconciliation_df["declared_quantity"]
+        * reconciliation_df["declared_unit_residual_value"]
+    )
+    reconciliation_df["detected_residual_value"] = (
+        reconciliation_df["detected_quantity"]
+        * reconciliation_df["declared_unit_residual_value"]
+    )
+    reconciliation_df["residual_value_difference"] = (
+        reconciliation_df["detected_residual_value"]
+        - reconciliation_df["declared_residual_value"]
+    )
+    reconciliation_df["residual_value_status"] = reconciliation_df[
+        "residual_value_difference"
+    ].apply(_determine_value_status)
 
     reconciliation_df = reconciliation_df.sort_values(["site", "class"]).reset_index(drop=True)
 

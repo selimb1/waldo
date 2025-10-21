@@ -5,13 +5,20 @@ import logging
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Sequence
 
-from PIL import Image
+from PIL import ExifTags, Image
 
 from .utils import ensure_directories, infer_site_from_name
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class GeoMetadata:
+    latitude: float | None = None
+    longitude: float | None = None
+    altitude: float | None = None
 
 
 @dataclass
@@ -25,6 +32,9 @@ class Detection:
     x_max: int
     y_max: int
     thumbnail_path: Path | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    altitude: float | None = None
 
     def to_row(self) -> List[str]:
         return [
@@ -37,6 +47,9 @@ class Detection:
             str(self.x_max),
             str(self.y_max),
             str(self.thumbnail_path) if self.thumbnail_path else "",
+            f"{self.latitude:.8f}" if self.latitude is not None else "",
+            f"{self.longitude:.8f}" if self.longitude is not None else "",
+            f"{self.altitude:.2f}" if self.altitude is not None else "",
         ]
 
 
@@ -50,7 +63,95 @@ HEADER = [
     "x_max",
     "y_max",
     "thumbnail_path",
+    "latitude",
+    "longitude",
+    "altitude",
 ]
+
+
+def _safe_float(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        if isinstance(value, tuple) and len(value) == 2 and value[1]:
+            return value[0] / value[1]
+    return None
+
+
+def _convert_gps_coordinate(value, ref) -> float | None:
+    if not value or not ref:
+        return None
+
+    if isinstance(ref, bytes):  # pragma: no cover - metadata edge case
+        try:
+            ref = ref.decode("ascii")
+        except Exception:
+            ref = str(ref)
+
+    components = []
+    for part in value:
+        converted = _safe_float(part)
+        if converted is None:
+            return None
+        components.append(converted)
+
+    if len(components) != 3:
+        return None
+
+    degrees, minutes, seconds = components
+    decimal = degrees + minutes / 60 + seconds / 3600
+    if ref.upper() in {"S", "W"}:
+        decimal *= -1
+    return decimal
+
+
+def _extract_geo_metadata(image_path: Path) -> GeoMetadata:
+    try:
+        with Image.open(image_path) as img:
+            exif = img.getexif()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        LOGGER.warning("Unable to read EXIF metadata from %s: %s", image_path, exc)
+        return GeoMetadata()
+
+    if not exif:
+        return GeoMetadata()
+
+    gps_raw = None
+    for tag_id, value in exif.items():
+        tag = ExifTags.TAGS.get(tag_id)
+        if tag == "GPSInfo":
+            gps_raw = value
+            break
+
+    if not gps_raw:
+        return GeoMetadata()
+
+    gps_data = {}
+    for key, val in gps_raw.items():
+        decoded = ExifTags.GPSTAGS.get(key, key)
+        gps_data[decoded] = val
+
+    latitude = _convert_gps_coordinate(
+        gps_data.get("GPSLatitude"), gps_data.get("GPSLatitudeRef")
+    )
+    longitude = _convert_gps_coordinate(
+        gps_data.get("GPSLongitude"), gps_data.get("GPSLongitudeRef")
+    )
+
+    altitude = None
+    altitude_value = gps_data.get("GPSAltitude")
+    if altitude_value is not None:
+        altitude = _safe_float(altitude_value)
+    altitude_ref = gps_data.get("GPSAltitudeRef")
+    if isinstance(altitude_ref, bytes):  # pragma: no cover - metadata edge case
+        try:
+            altitude_ref = altitude_ref.decode("ascii")
+        except Exception:
+            altitude_ref = str(altitude_ref)
+    if altitude is not None and altitude_ref in {1, "1"}:
+        altitude *= -1
+
+    return GeoMetadata(latitude=latitude, longitude=longitude, altitude=altitude)
 
 
 def _generate_demo_detections(
@@ -61,6 +162,7 @@ def _generate_demo_detections(
     max_confidence: float,
     rng: random.Random,
 ) -> List[Detection]:
+    geo_metadata = _extract_geo_metadata(image_path)
     with Image.open(image_path) as img:
         width, height = img.size
 
@@ -88,6 +190,9 @@ def _generate_demo_detections(
                 y_min=y_min,
                 x_max=min(width, x_max),
                 y_max=min(height, y_max),
+                latitude=geo_metadata.latitude,
+                longitude=geo_metadata.longitude,
+                altitude=geo_metadata.altitude,
             )
         )
     return detections
@@ -111,6 +216,65 @@ def _write_csv(detections: Iterable[Detection], output_path: Path) -> None:
         writer.writerow(HEADER)
         for detection in detections:
             writer.writerow(detection.to_row())
+
+
+def _load_yolo_model(model_path: Path, device: str | None):
+    from ultralytics import YOLO  # Local import to keep optional dependency lazy
+
+    LOGGER.info("Loading YOLO model from %s", model_path)
+    model = YOLO(str(model_path))
+    if device:
+        model.to(device)
+    return model
+
+
+def _yolo_detections_for_image(
+    model,
+    image_path: Path,
+    allowed_classes: Sequence[str] | None,
+    confidence_threshold: float,
+) -> List[Detection]:
+    detections: List[Detection] = []
+    geo_metadata = _extract_geo_metadata(image_path)
+    results = model.predict(source=str(image_path), conf=confidence_threshold, verbose=False)
+
+    if not results:
+        return detections
+
+    result = results[0]
+    class_filter = {cls.lower() for cls in allowed_classes} if allowed_classes else None
+    names = getattr(result, "names", {}) or getattr(model, "names", {})
+
+    width = int(result.orig_shape[1])
+    height = int(result.orig_shape[0])
+
+    for box in getattr(result, "boxes", []) or []:
+        cls_idx = int(box.cls)
+        label = names.get(cls_idx, str(cls_idx)) if isinstance(names, dict) else str(cls_idx)
+
+        if class_filter and label.lower() not in class_filter:
+            continue
+
+        confidence = float(box.conf)
+        x_min, y_min, x_max, y_max = [float(v) for v in box.xyxy[0].tolist()]
+
+        detections.append(
+            Detection(
+                image_path=image_path,
+                site=infer_site_from_name(image_path),
+                label=label,
+                confidence=confidence,
+                x_min=max(0, int(round(x_min))),
+                y_min=max(0, int(round(y_min))),
+                x_max=min(width, int(round(x_max))),
+                y_max=min(height, int(round(y_max))),
+                latitude=geo_metadata.latitude,
+                longitude=geo_metadata.longitude,
+                altitude=geo_metadata.altitude,
+            )
+        )
+
+    return detections
 
 
 def run_detection(config: dict) -> Path:
@@ -142,6 +306,16 @@ def run_detection(config: dict) -> Path:
     if not image_files:
         LOGGER.warning("No images found in %s", input_dir)
 
+    model = None
+    confidence_threshold = float(detection_cfg.get("confidence_threshold", min_confidence))
+    model_path = Path(detection_cfg.get("model_path", "models/waldo.pt"))
+    device = detection_cfg.get("device")
+
+    if not demo_mode:
+        if not model_path.exists():
+            raise FileNotFoundError(f"YOLO model weights not found at {model_path}")
+        model = _load_yolo_model(model_path, device)
+
     for image_path in image_files:
         LOGGER.info("Processing image %s", image_path.name)
         if demo_mode:
@@ -156,7 +330,16 @@ def run_detection(config: dict) -> Path:
                 )
             )
         else:
-            raise NotImplementedError("Real YOLO detection not implemented in this MVP")
+            if model is None:
+                raise RuntimeError("YOLO model failed to load")
+            detections.extend(
+                _yolo_detections_for_image(
+                    model,
+                    image_path,
+                    classes,
+                    confidence_threshold,
+                )
+            )
 
     _save_thumbnails(detections, thumbnails_dir)
     _write_csv(detections, detections_path)

@@ -34,6 +34,16 @@ def load_inventory(path: str | Path) -> pd.DataFrame:
     missing = required_columns - set(df.columns)
     if missing:
         raise ValueError(f"Inventory file is missing columns: {missing}")
+
+    numeric_columns = [
+        "declared_quantity",
+        "declared_unit_value",
+        "declared_unit_residual_value",
+    ]
+    for column in numeric_columns:
+        if column in df.columns:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+
     return df
 
 

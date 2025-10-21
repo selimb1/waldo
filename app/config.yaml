@@ -5,6 +5,8 @@ paths:
   detections: data/outputs/detections.csv
   reconciliation: data/outputs/reconciliation.csv
   report: data/outputs/report.html
+  report_pdf: data/outputs/report.pdf
+  report_excel: data/outputs/report.xlsx
   inventory: data/inventory.csv
   sites: data/sites.csv
   template: templates/report.html.j2

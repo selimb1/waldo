@@ -5,7 +5,7 @@ import logging
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Sequence
 
 from PIL import Image
 
@@ -113,6 +113,61 @@ def _write_csv(detections: Iterable[Detection], output_path: Path) -> None:
             writer.writerow(detection.to_row())
 
 
+def _load_yolo_model(model_path: Path, device: str | None):
+    from ultralytics import YOLO  # Local import to keep optional dependency lazy
+
+    LOGGER.info("Loading YOLO model from %s", model_path)
+    model = YOLO(str(model_path))
+    if device:
+        model.to(device)
+    return model
+
+
+def _yolo_detections_for_image(
+    model,
+    image_path: Path,
+    allowed_classes: Sequence[str] | None,
+    confidence_threshold: float,
+) -> List[Detection]:
+    detections: List[Detection] = []
+    results = model.predict(source=str(image_path), conf=confidence_threshold, verbose=False)
+
+    if not results:
+        return detections
+
+    result = results[0]
+    class_filter = {cls.lower() for cls in allowed_classes} if allowed_classes else None
+    names = getattr(result, "names", {}) or getattr(model, "names", {})
+
+    width = int(result.orig_shape[1])
+    height = int(result.orig_shape[0])
+
+    for box in getattr(result, "boxes", []) or []:
+        cls_idx = int(box.cls)
+        label = names.get(cls_idx, str(cls_idx)) if isinstance(names, dict) else str(cls_idx)
+
+        if class_filter and label.lower() not in class_filter:
+            continue
+
+        confidence = float(box.conf)
+        x_min, y_min, x_max, y_max = [float(v) for v in box.xyxy[0].tolist()]
+
+        detections.append(
+            Detection(
+                image_path=image_path,
+                site=infer_site_from_name(image_path),
+                label=label,
+                confidence=confidence,
+                x_min=max(0, int(round(x_min))),
+                y_min=max(0, int(round(y_min))),
+                x_max=min(width, int(round(x_max))),
+                y_max=min(height, int(round(y_max))),
+            )
+        )
+
+    return detections
+
+
 def run_detection(config: dict) -> Path:
     detection_cfg = config.get("detection", {})
     paths_cfg = config.get("paths", {})
@@ -142,6 +197,16 @@ def run_detection(config: dict) -> Path:
     if not image_files:
         LOGGER.warning("No images found in %s", input_dir)
 
+    model = None
+    confidence_threshold = float(detection_cfg.get("confidence_threshold", min_confidence))
+    model_path = Path(detection_cfg.get("model_path", "models/waldo.pt"))
+    device = detection_cfg.get("device")
+
+    if not demo_mode:
+        if not model_path.exists():
+            raise FileNotFoundError(f"YOLO model weights not found at {model_path}")
+        model = _load_yolo_model(model_path, device)
+
     for image_path in image_files:
         LOGGER.info("Processing image %s", image_path.name)
         if demo_mode:
@@ -156,7 +221,16 @@ def run_detection(config: dict) -> Path:
                 )
             )
         else:
-            raise NotImplementedError("Real YOLO detection not implemented in this MVP")
+            if model is None:
+                raise RuntimeError("YOLO model failed to load")
+            detections.extend(
+                _yolo_detections_for_image(
+                    model,
+                    image_path,
+                    classes,
+                    confidence_threshold,
+                )
+            )
 
     _save_thumbnails(detections, thumbnails_dir)
     _write_csv(detections, detections_path)

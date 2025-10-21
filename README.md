@@ -49,7 +49,7 @@ python -m app.main
 
 El pipeline ejecuta tres etapas principales:
 
-1. **Detección y miniaturas** (`app/detect.py`): procesa cada imagen en `data/inputs/` y, en modo demo, genera detecciones sintéticas reproducibles junto con recortes JPEG en `data/outputs/thumbnails/`.
+1. **Detección y miniaturas** (`app/detect.py`): procesa cada imagen en `data/inputs/`. Con `demo_mode: true` genera detecciones sintéticas reproducibles, y si lo desactivas cargará el modelo YOLO configurado (por defecto `models/waldo.pt`) para producir resultados reales junto con recortes JPEG en `data/outputs/thumbnails/`.
 2. **Conciliación contable** (`app/reconcile.py`): compara las detecciones agregadas por obra y clase con el inventario (`data/inventory.csv`) y escribe `data/outputs/reconciliation.csv`.
 3. **Informe técnico** (`app/report.py`): usa la plantilla Jinja `templates/report.html.j2` para renderizar un dashboard HTML con tablas, badges de estado, mapa (Folium) y galería de evidencias.
 

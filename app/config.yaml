@@ -14,6 +14,9 @@ logging:
 
 detection:
   demo_mode: true
+  model_path: models/waldo.pt
+  confidence_threshold: 0.25
+  device: null
   classes:
     - excavator
     - truck

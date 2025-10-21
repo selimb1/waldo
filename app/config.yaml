@@ -1,0 +1,28 @@
+paths:
+  inputs: data/inputs
+  outputs: data/outputs
+  thumbnails: data/outputs/thumbnails
+  detections: data/outputs/detections.csv
+  reconciliation: data/outputs/reconciliation.csv
+  report: data/outputs/report.html
+  inventory: data/inventory.csv
+  sites: data/sites.csv
+  template: templates/report.html.j2
+
+logging:
+  level: INFO
+
+detection:
+  demo_mode: true
+  classes:
+    - excavator
+    - truck
+    - crane
+  max_detections_per_image: 6
+  min_confidence: 0.35
+  max_confidence: 0.95
+  seed: 1234
+
+report:
+  title: "Informe de Auditoría Visual WALDO"
+  company_name: "Constructora Demo"

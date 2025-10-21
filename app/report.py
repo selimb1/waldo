@@ -28,6 +28,14 @@ else:
 
 from .utils import ensure_directories, load_sites
 
+
+def _determine_value_status(difference: float, tolerance: float = 1e-6) -> str:
+    if abs(difference) <= tolerance:
+        return "OK"
+    if difference > 0:
+        return "SOBRANTE"
+    return "FALTANTE"
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -140,6 +148,40 @@ def _prepare_context(
         else pd.DataFrame(columns=["site", "status", "count"])
     )
 
+    value_summary_df = pd.DataFrame()
+    if not reconciliation_df.empty:
+        grouped = reconciliation_df.groupby("site")
+        value_summary_df = grouped[
+            [
+                "declared_gross_value",
+                "detected_gross_value",
+                "gross_value_difference",
+                "declared_residual_value",
+                "detected_residual_value",
+                "residual_value_difference",
+            ]
+        ].sum()
+        value_summary_df = value_summary_df.reset_index()
+        value_summary_df["gross_value_status"] = value_summary_df[
+            "gross_value_difference"
+        ].apply(_determine_value_status)
+        value_summary_df["residual_value_status"] = value_summary_df[
+            "residual_value_difference"
+        ].apply(_determine_value_status)
+        value_summary_df = value_summary_df[
+            [
+                "site",
+                "declared_gross_value",
+                "detected_gross_value",
+                "gross_value_difference",
+                "gross_value_status",
+                "declared_residual_value",
+                "detected_residual_value",
+                "residual_value_difference",
+                "residual_value_status",
+            ]
+        ]
+
     total_detected = (
         int(reconciliation_df["detected_quantity"].sum()) if not reconciliation_df.empty else 0
     )
@@ -168,6 +210,17 @@ def _prepare_context(
         else 0.0
     )
 
+    total_gross_difference = (
+        float(reconciliation_df["gross_value_difference"].sum())
+        if "gross_value_difference" in reconciliation_df
+        else 0.0
+    )
+    total_residual_difference = (
+        float(reconciliation_df["residual_value_difference"].sum())
+        if "residual_value_difference" in reconciliation_df
+        else 0.0
+    )
+
     map_html = _build_map_html(sites_df, reconciliation_df)
 
     context = {
@@ -176,15 +229,18 @@ def _prepare_context(
         "detections": detections_df.to_dict(orient="records"),
         "reconciliation": reconciliation_df.to_dict(orient="records"),
         "summary": summary_df.to_dict(orient="records"),
+        "value_summary": value_summary_df.to_dict(orient="records"),
         "total_detected": total_detected,
         "total_declared": total_declared,
         "total_declared_value": total_declared_value,
         "total_detected_value": total_detected_value,
+        "total_gross_value_difference": total_gross_difference,
         "total_declared_residual_value": total_declared_residual_value,
         "total_detected_residual_value": total_detected_residual_value,
+        "total_residual_value_difference": total_residual_difference,
         "map_html": map_html,
     }
-    return context, summary_df
+    return context, summary_df, value_summary_df
 
 
 def _export_pdf(
@@ -192,6 +248,7 @@ def _export_pdf(
     reconciliation_df: pd.DataFrame,
     detections_df: pd.DataFrame,
     summary_df: pd.DataFrame,
+    value_summary_df: pd.DataFrame,
     pdf_path: Path,
 ) -> None:
     ensure_directories(pdf_path.parent)
@@ -288,6 +345,35 @@ def _export_pdf(
         elements.append(Paragraph("Detecciones", styles["Heading3"]))
         elements.append(det_table)
 
+    if not value_summary_df.empty:
+        value_summary_data = [
+            [
+                "Sitio",
+                "Valor declarado",
+                "Valor detectado",
+                "Diferencia",
+                "Estado valor",
+                "Val. dep. declarado",
+                "Val. dep. detectado",
+                "Dif. dep.",
+                "Estado dep.",
+            ]
+        ] + value_summary_df.astype(str).values.tolist()
+        value_table = Table(value_summary_data, hAlign="LEFT")
+        value_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                ]
+            )
+        )
+        elements.append(Paragraph("Resumen de valores por obra", styles["Heading3"]))
+        elements.append(value_table)
+        elements.append(Spacer(1, 18))
+
     try:
         doc.build(elements)
     except Exception as exc:  # pragma: no cover - reportlab internal errors
@@ -301,6 +387,7 @@ def _export_excel(
     reconciliation_df: pd.DataFrame,
     detections_df: pd.DataFrame,
     summary_df: pd.DataFrame,
+    value_summary_df: pd.DataFrame,
     excel_path: Path,
 ) -> None:
     ensure_directories(excel_path.parent)
@@ -327,6 +414,13 @@ def _export_excel(
                 else pd.DataFrame([{"mensaje": "Sin resumen disponible"}])
             )
             summary_export.to_excel(writer, sheet_name="Resumen", index=False)
+
+            value_summary_export = (
+                value_summary_df
+                if not value_summary_df.empty
+                else pd.DataFrame([{"mensaje": "Sin resumen de valores"}])
+            )
+            value_summary_export.to_excel(writer, sheet_name="ResumenValores", index=False)
     except ImportError as exc:
         LOGGER.warning("Unable to export Excel report due to missing dependency: %s", exc)
         return
@@ -349,7 +443,9 @@ def render_report(config: Dict[str, Any], detections_path: Path, reconciliation_
     )
     sites_df = load_sites(paths_cfg["sites"])
 
-    context, summary_df = _prepare_context(config, detections_df, reconciliation_df, sites_df)
+    context, summary_df, value_summary_df = _prepare_context(
+        config, detections_df, reconciliation_df, sites_df
+    )
 
     html_content = template.render(**context)
     report_path.write_text(html_content, encoding="utf-8")
@@ -359,9 +455,22 @@ def render_report(config: Dict[str, Any], detections_path: Path, reconciliation_
     excel_cfg = paths_cfg.get("report_excel")
 
     if pdf_cfg:
-        _export_pdf(context, reconciliation_df, detections_df, summary_df, Path(pdf_cfg))
+        _export_pdf(
+            context,
+            reconciliation_df,
+            detections_df,
+            summary_df,
+            value_summary_df,
+            Path(pdf_cfg),
+        )
 
     if excel_cfg:
-        _export_excel(reconciliation_df, detections_df, summary_df, Path(excel_cfg))
+        _export_excel(
+            reconciliation_df,
+            detections_df,
+            summary_df,
+            value_summary_df,
+            Path(excel_cfg),
+        )
 
     return report_path

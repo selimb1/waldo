@@ -73,10 +73,32 @@ def run_reconciliation(config: dict, detections_path: Path) -> Path:
         .astype(int)
     )
 
-    for column in ["declared_unit_value", "declared_unit_residual_value"]:
-        if column not in reconciliation_df.columns:
-            reconciliation_df[column] = 0.0
-        reconciliation_df[column] = reconciliation_df[column].fillna(0).astype(float)
+    class_unit_value = (
+        inventory_df.drop_duplicates(subset=["class"])
+        .set_index("class")
+        .get("declared_unit_value")
+        .to_dict()
+    )
+    class_unit_residual = (
+        inventory_df.drop_duplicates(subset=["class"])
+        .set_index("class")
+        .get("declared_unit_residual_value")
+        .to_dict()
+    )
+
+    reconciliation_df["declared_unit_value"] = reconciliation_df["declared_unit_value"].fillna(
+        reconciliation_df["class"].map(class_unit_value)
+    )
+    reconciliation_df["declared_unit_residual_value"] = reconciliation_df[
+        "declared_unit_residual_value"
+    ].fillna(reconciliation_df["class"].map(class_unit_residual))
+
+    reconciliation_df["declared_unit_value"] = (
+        reconciliation_df["declared_unit_value"].fillna(0).astype(float)
+    )
+    reconciliation_df["declared_unit_residual_value"] = (
+        reconciliation_df["declared_unit_residual_value"].fillna(0).astype(float)
+    )
 
     reconciliation_df["difference"] = (
         reconciliation_df["detected_quantity"] - reconciliation_df["declared_quantity"]

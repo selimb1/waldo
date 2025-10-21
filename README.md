@@ -50,8 +50,8 @@ python -m app.main
 El pipeline ejecuta tres etapas principales:
 
 1. **Detección y miniaturas** (`app/detect.py`): procesa cada imagen en `data/inputs/`. Con `demo_mode: true` genera detecciones sintéticas reproducibles, y si lo desactivas cargará el modelo YOLO configurado (por defecto `models/waldo.pt`) para producir resultados reales junto con recortes JPEG en `data/outputs/thumbnails/`. Además extrae metadatos GPS/EXIF (latitud, longitud y altitud cuando están disponibles) y los vuelca en `data/outputs/detections.csv` para georreferenciar cada hallazgo.
-2. **Conciliación contable** (`app/reconcile.py`): compara las detecciones agregadas por obra y clase con el inventario (`data/inventory.csv`), calcula diferencias tanto de cantidad como de valor contable y valor depreciado, y escribe `data/outputs/reconciliation.csv` con los estados para cada métrica.
-3. **Informe técnico** (`app/report.py`): usa la plantilla Jinja `templates/report.html.j2` para renderizar un dashboard HTML con tablas, badges de estado, mapa (Folium) y galería de evidencias, y luego exporta el resultado a PDF y Excel.
+2. **Conciliación contable** (`app/reconcile.py`): compara las detecciones agregadas por obra y clase con el inventario (`data/inventory.csv`), calcula diferencias tanto de cantidad como de valor contable y valor depreciado, y escribe `data/outputs/reconciliation.csv` con los estados para cada métrica. Si se detectan clases que no existían en el inventario del sitio, el sistema infiere el valor unitario a partir del histórico por clase para estimar el impacto monetario del sobrante/faltante.
+3. **Informe técnico** (`app/report.py`): usa la plantilla Jinja `templates/report.html.j2` para renderizar un dashboard HTML con tablas, badges de estado, mapa (Folium) y galería de evidencias, e incorpora un resumen financiero por obra con totales declarados/detectados y diferencias monetarias. Luego exporta el resultado a PDF y Excel.
 
 Puedes ajustar rutas, clases a detectar y parámetros del modo demo editando `app/config.yaml`.
 

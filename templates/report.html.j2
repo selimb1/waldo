@@ -107,6 +107,18 @@
         <div class="col-md-6">
           <div class="card shadow-sm mb-3">
             <div class="card-body">
+              <h5 class="card-title">Diferencia de valor</h5>
+              <p class="h3">
+                ${{ '{:,.2f}'.format(total_gross_value_difference) }}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6">
+          <div class="card shadow-sm mb-3">
+            <div class="card-body">
               <h5 class="card-title">Valor depreciado declarado</h5>
               <p class="h3">
                 ${{ '{:,.2f}'.format(total_declared_residual_value) }}
@@ -124,6 +136,70 @@
             </div>
           </div>
         </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6">
+          <div class="card shadow-sm mb-3">
+            <div class="card-body">
+              <h5 class="card-title">Diferencia de valor depreciado</h5>
+              <p class="h3">
+                ${{ '{:,.2f}'.format(total_residual_value_difference) }}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mb-5">
+      <h2>Resumen de valores por obra</h2>
+      <div class="table-responsive">
+        <table class="table table-striped table-bordered align-middle">
+          <thead class="table-dark">
+            <tr>
+              <th>Obra</th>
+              <th>Valor declarado</th>
+              <th>Valor detectado</th>
+              <th>Diferencia</th>
+              <th>Estado valor</th>
+              <th>Val. dep. declarado</th>
+              <th>Val. dep. detectado</th>
+              <th>Diferencia val. dep.</th>
+              <th>Estado val. dep.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if value_summary %}
+            {% for item in value_summary %}
+            <tr>
+              <td>{{ item.site }}</td>
+              <td>${{ '{:,.2f}'.format(item.declared_gross_value) }}</td>
+              <td>${{ '{:,.2f}'.format(item.detected_gross_value) }}</td>
+              <td>${{ '{:,.2f}'.format(item.gross_value_difference) }}</td>
+              <td>
+                <span class="badge badge-status-{{ item.gross_value_status }}">
+                  {{ item.gross_value_status }}
+                </span>
+              </td>
+              <td>${{ '{:,.2f}'.format(item.declared_residual_value) }}</td>
+              <td>${{ '{:,.2f}'.format(item.detected_residual_value) }}</td>
+              <td>${{ '{:,.2f}'.format(item.residual_value_difference) }}</td>
+              <td>
+                <span class="badge badge-status-{{ item.residual_value_status }}">
+                  {{ item.residual_value_status }}
+                </span>
+              </td>
+            </tr>
+            {% endfor %}
+            {% else %}
+            <tr>
+              <td colspan="9" class="text-center text-muted">
+                Sin datos de valores por obra.
+              </td>
+            </tr>
+            {% endif %}
+          </tbody>
+        </table>
       </div>
     </section>
 

@@ -7,11 +7,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Sequence
 
-from PIL import Image
+from PIL import ExifTags, Image
 
 from .utils import ensure_directories, infer_site_from_name
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class GeoMetadata:
+    latitude: float | None = None
+    longitude: float | None = None
+    altitude: float | None = None
 
 
 @dataclass
@@ -25,6 +32,9 @@ class Detection:
     x_max: int
     y_max: int
     thumbnail_path: Path | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    altitude: float | None = None
 
     def to_row(self) -> List[str]:
         return [
@@ -37,6 +47,9 @@ class Detection:
             str(self.x_max),
             str(self.y_max),
             str(self.thumbnail_path) if self.thumbnail_path else "",
+            f"{self.latitude:.8f}" if self.latitude is not None else "",
+            f"{self.longitude:.8f}" if self.longitude is not None else "",
+            f"{self.altitude:.2f}" if self.altitude is not None else "",
         ]
 
 
@@ -50,7 +63,95 @@ HEADER = [
     "x_max",
     "y_max",
     "thumbnail_path",
+    "latitude",
+    "longitude",
+    "altitude",
 ]
+
+
+def _safe_float(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        if isinstance(value, tuple) and len(value) == 2 and value[1]:
+            return value[0] / value[1]
+    return None
+
+
+def _convert_gps_coordinate(value, ref) -> float | None:
+    if not value or not ref:
+        return None
+
+    if isinstance(ref, bytes):  # pragma: no cover - metadata edge case
+        try:
+            ref = ref.decode("ascii")
+        except Exception:
+            ref = str(ref)
+
+    components = []
+    for part in value:
+        converted = _safe_float(part)
+        if converted is None:
+            return None
+        components.append(converted)
+
+    if len(components) != 3:
+        return None
+
+    degrees, minutes, seconds = components
+    decimal = degrees + minutes / 60 + seconds / 3600
+    if ref.upper() in {"S", "W"}:
+        decimal *= -1
+    return decimal
+
+
+def _extract_geo_metadata(image_path: Path) -> GeoMetadata:
+    try:
+        with Image.open(image_path) as img:
+            exif = img.getexif()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        LOGGER.warning("Unable to read EXIF metadata from %s: %s", image_path, exc)
+        return GeoMetadata()
+
+    if not exif:
+        return GeoMetadata()
+
+    gps_raw = None
+    for tag_id, value in exif.items():
+        tag = ExifTags.TAGS.get(tag_id)
+        if tag == "GPSInfo":
+            gps_raw = value
+            break
+
+    if not gps_raw:
+        return GeoMetadata()
+
+    gps_data = {}
+    for key, val in gps_raw.items():
+        decoded = ExifTags.GPSTAGS.get(key, key)
+        gps_data[decoded] = val
+
+    latitude = _convert_gps_coordinate(
+        gps_data.get("GPSLatitude"), gps_data.get("GPSLatitudeRef")
+    )
+    longitude = _convert_gps_coordinate(
+        gps_data.get("GPSLongitude"), gps_data.get("GPSLongitudeRef")
+    )
+
+    altitude = None
+    altitude_value = gps_data.get("GPSAltitude")
+    if altitude_value is not None:
+        altitude = _safe_float(altitude_value)
+    altitude_ref = gps_data.get("GPSAltitudeRef")
+    if isinstance(altitude_ref, bytes):  # pragma: no cover - metadata edge case
+        try:
+            altitude_ref = altitude_ref.decode("ascii")
+        except Exception:
+            altitude_ref = str(altitude_ref)
+    if altitude is not None and altitude_ref in {1, "1"}:
+        altitude *= -1
+
+    return GeoMetadata(latitude=latitude, longitude=longitude, altitude=altitude)
 
 
 def _generate_demo_detections(
@@ -61,6 +162,7 @@ def _generate_demo_detections(
     max_confidence: float,
     rng: random.Random,
 ) -> List[Detection]:
+    geo_metadata = _extract_geo_metadata(image_path)
     with Image.open(image_path) as img:
         width, height = img.size
 
@@ -88,6 +190,9 @@ def _generate_demo_detections(
                 y_min=y_min,
                 x_max=min(width, x_max),
                 y_max=min(height, y_max),
+                latitude=geo_metadata.latitude,
+                longitude=geo_metadata.longitude,
+                altitude=geo_metadata.altitude,
             )
         )
     return detections
@@ -130,6 +235,7 @@ def _yolo_detections_for_image(
     confidence_threshold: float,
 ) -> List[Detection]:
     detections: List[Detection] = []
+    geo_metadata = _extract_geo_metadata(image_path)
     results = model.predict(source=str(image_path), conf=confidence_threshold, verbose=False)
 
     if not results:
@@ -162,6 +268,9 @@ def _yolo_detections_for_image(
                 y_min=max(0, int(round(y_min))),
                 x_max=min(width, int(round(x_max))),
                 y_max=min(height, int(round(y_max))),
+                latitude=geo_metadata.latitude,
+                longitude=geo_metadata.longitude,
+                altitude=geo_metadata.altitude,
             )
         )
 

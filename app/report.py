@@ -31,6 +31,12 @@ from .utils import ensure_directories, load_sites
 LOGGER = logging.getLogger(__name__)
 
 
+def _format_currency(value: float | int | None) -> str:
+    if value is None:
+        return "$0.00"
+    return f"${float(value):,.2f}"
+
+
 def _load_template(template_path: Path) -> Environment:
     env = Environment(
         loader=FileSystemLoader(template_path.parent),
@@ -59,14 +65,35 @@ def _build_map_html(sites_df: pd.DataFrame, reconciliation_df: pd.DataFrame) -> 
             popup_html = "<p>Sin datos de conciliación.</p>"
         else:
             popup_html = "<table class='table table-sm'>"
-            popup_html += "<tr><th>Clase</th><th>Declarado</th><th>Detectado</th><th>Estado</th></tr>"
+            popup_html += (
+                "<tr>"
+                "<th>Clase</th><th>Declarado</th><th>Detectado</th><th>Diferencia</th><th>Estado</th>"
+                "<th>Valor decl.</th><th>Valor det.</th><th>Dif. valor</th><th>Estado valor</th>"
+                "<th>Val. dep. decl.</th><th>Val. dep. det.</th><th>Dif. dep.</th><th>Estado dep.</th>"
+                "</tr>"
+            )
             for _, rec in records.iterrows():
+                declared_gross = rec.get("declared_gross_value", 0.0)
+                detected_gross = rec.get("detected_gross_value", 0.0)
+                gross_diff = rec.get("gross_value_difference", 0.0)
+                declared_residual = rec.get("declared_residual_value", 0.0)
+                detected_residual = rec.get("detected_residual_value", 0.0)
+                residual_diff = rec.get("residual_value_difference", 0.0)
                 popup_html += (
                     "<tr>"
                     f"<td>{rec['class']}</td>"
                     f"<td>{rec['declared_quantity']}</td>"
                     f"<td>{rec['detected_quantity']}</td>"
+                    f"<td>{rec['difference']}</td>"
                     f"<td>{rec['status']}</td>"
+                    f"<td>{_format_currency(declared_gross)}</td>"
+                    f"<td>{_format_currency(detected_gross)}</td>"
+                    f"<td>{_format_currency(gross_diff)}</td>"
+                    f"<td>{rec.get('gross_value_status', 'OK')}</td>"
+                    f"<td>{_format_currency(declared_residual)}</td>"
+                    f"<td>{_format_currency(detected_residual)}</td>"
+                    f"<td>{_format_currency(residual_diff)}</td>"
+                    f"<td>{rec.get('residual_value_status', 'OK')}</td>"
                     "</tr>"
                 )
             popup_html += "</table>"
@@ -90,9 +117,22 @@ def _prepare_context(
     if not detections_df.empty and "confidence" in detections_df.columns:
         detections_df["confidence"] = detections_df["confidence"].astype(float)
     if not reconciliation_df.empty:
-        for column in ["declared_quantity", "detected_quantity", "difference"]:
+        quantity_columns = ["declared_quantity", "detected_quantity", "difference"]
+        for column in quantity_columns:
             if column in reconciliation_df.columns:
                 reconciliation_df[column] = reconciliation_df[column].astype(int)
+
+        value_columns = [
+            "declared_gross_value",
+            "detected_gross_value",
+            "gross_value_difference",
+            "declared_residual_value",
+            "detected_residual_value",
+            "residual_value_difference",
+        ]
+        for column in value_columns:
+            if column in reconciliation_df.columns:
+                reconciliation_df[column] = reconciliation_df[column].astype(float)
 
     summary_df = (
         reconciliation_df.groupby(["site", "status"]).size().reset_index(name="count")
@@ -100,8 +140,33 @@ def _prepare_context(
         else pd.DataFrame(columns=["site", "status", "count"])
     )
 
-    total_detected = int(reconciliation_df["detected_quantity"].sum()) if not reconciliation_df.empty else 0
-    total_declared = int(reconciliation_df["declared_quantity"].sum()) if not reconciliation_df.empty else 0
+    total_detected = (
+        int(reconciliation_df["detected_quantity"].sum()) if not reconciliation_df.empty else 0
+    )
+    total_declared = (
+        int(reconciliation_df["declared_quantity"].sum()) if not reconciliation_df.empty else 0
+    )
+
+    total_declared_value = (
+        float(reconciliation_df["declared_gross_value"].sum())
+        if "declared_gross_value" in reconciliation_df
+        else 0.0
+    )
+    total_detected_value = (
+        float(reconciliation_df["detected_gross_value"].sum())
+        if "detected_gross_value" in reconciliation_df
+        else 0.0
+    )
+    total_declared_residual_value = (
+        float(reconciliation_df["declared_residual_value"].sum())
+        if "declared_residual_value" in reconciliation_df
+        else 0.0
+    )
+    total_detected_residual_value = (
+        float(reconciliation_df["detected_residual_value"].sum())
+        if "detected_residual_value" in reconciliation_df
+        else 0.0
+    )
 
     map_html = _build_map_html(sites_df, reconciliation_df)
 
@@ -113,6 +178,10 @@ def _prepare_context(
         "summary": summary_df.to_dict(orient="records"),
         "total_detected": total_detected,
         "total_declared": total_declared,
+        "total_declared_value": total_declared_value,
+        "total_detected_value": total_detected_value,
+        "total_declared_residual_value": total_declared_residual_value,
+        "total_detected_residual_value": total_detected_residual_value,
         "map_html": map_html,
     }
     return context, summary_df
@@ -148,6 +217,24 @@ def _export_pdf(
         f"Total detectado: {context.get('total_detected', 0)}"
     )
     elements.append(Paragraph(totals_text, styles["Normal"]))
+
+    declared_value = context.get("total_declared_value", 0.0)
+    detected_value = context.get("total_detected_value", 0.0)
+    if declared_value or detected_value:
+        value_totals = (
+            f"Valor declarado: ${declared_value:,.2f} | "
+            f"Valor detectado: ${detected_value:,.2f}"
+        )
+        elements.append(Paragraph(value_totals, styles["Normal"]))
+
+    declared_residual = context.get("total_declared_residual_value", 0.0)
+    detected_residual = context.get("total_detected_residual_value", 0.0)
+    if declared_residual or detected_residual:
+        residual_totals = (
+            f"Valor depreciado declarado: ${declared_residual:,.2f} | "
+            f"Valor depreciado detectado: ${detected_residual:,.2f}"
+        )
+        elements.append(Paragraph(residual_totals, styles["Normal"]))
     elements.append(Spacer(1, 18))
 
     if not summary_df.empty:

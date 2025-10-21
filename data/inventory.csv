@@ -1,6 +1,6 @@
-site,class,declared_quantity
-ObraA,excavator,5
-ObraA,truck,8
-ObraB,excavator,2
-ObraB,truck,4
-ObraC,crane,1
+site,class,declared_quantity,declared_unit_value,declared_unit_residual_value
+ObraA,excavator,5,150000,105000
+ObraA,truck,8,90000,63000
+ObraB,excavator,2,150000,102000
+ObraB,truck,4,90000,60000
+ObraC,crane,1,280000,196000

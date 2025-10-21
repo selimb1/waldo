@@ -47,6 +47,14 @@ python -m app.main
 
 4) El informe se guarda en `data/outputs/report.html`.
 
+El pipeline ejecuta tres etapas principales:
+
+1. **Detección y miniaturas** (`app/detect.py`): procesa cada imagen en `data/inputs/` y, en modo demo, genera detecciones sintéticas reproducibles junto con recortes JPEG en `data/outputs/thumbnails/`.
+2. **Conciliación contable** (`app/reconcile.py`): compara las detecciones agregadas por obra y clase con el inventario (`data/inventory.csv`) y escribe `data/outputs/reconciliation.csv`.
+3. **Informe técnico** (`app/report.py`): usa la plantilla Jinja `templates/report.html.j2` para renderizar un dashboard HTML con tablas, badges de estado, mapa (Folium) y galería de evidencias.
+
+Puedes ajustar rutas, clases a detectar y parámetros del modo demo editando `app/config.yaml`.
+
 ## Datos de ejemplo
 Incluí un `inventory.csv` y `sites.csv` de muestra. El script puede funcionar con imágenes reales o, si no hay pesos, también puede correrse en **modo demo** (simula detecciones) activando `demo_mode: true` en `config.yaml`.
 
